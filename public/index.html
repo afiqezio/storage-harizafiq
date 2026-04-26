@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>cloud.harizafiq.com</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --danger: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --success: #22c55e;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      max-width: 900px;
+      margin: 0 auto 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    header span {
+      font-size: 0.8rem;
+      color: var(--muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+
+    .container { max-width: 900px; margin: 0 auto; }
+
+    /* Drop zone */
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 3rem 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .dropzone:hover, .dropzone.dragging {
+      border-color: var(--accent);
+      background: rgba(99,102,241,0.05);
+    }
+
+    .dropzone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .dropzone-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .dropzone p { color: var(--muted); font-size: 0.9rem; }
+    .dropzone p strong { color: var(--text); }
+
+    /* Progress */
+    .progress-wrap {
+      margin-top: 1rem;
+      display: none;
+    }
+
+    .progress-wrap.visible { display: block; }
+
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .progress-bar-bg {
+      height: 6px;
+      background: var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+      width: 0%;
+      transition: width 0.2s;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      z-index: 999;
+    }
+
+    .toast.visible { display: flex; }
+    .toast.success { border-color: var(--success); }
+    .toast.error { border-color: var(--danger); }
+
+    /* File grid */
+    .files-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 2rem 0 1rem;
+    }
+
+    .files-header h2 { font-size: 1rem; font-weight: 600; }
+
+    .refresh-btn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .refresh-btn:hover { color: var(--text); border-color: var(--accent); }
+
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+
+    .file-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.2s;
+    }
+
+    .file-card:hover { border-color: var(--accent); }
+
+    .file-preview {
+      height: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .file-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .file-preview .file-icon {
+      font-size: 2.5rem;
+      opacity: 0.4;
+    }
+
+    .file-info {
+      padding: 0.6rem 0.75rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .file-name {
+      font-size: 0.8rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .file-meta {
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    .file-actions {
+      display: flex;
+      border-top: 1px solid var(--border);
+    }
+
+    .file-actions button {
+      flex: 1;
+      background: none;
+      border: none;
+      color: var(--muted);
+      padding: 0.5rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .file-actions button:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .file-actions button.del:hover { color: var(--danger); }
+    .file-actions button + button { border-left: 1px solid var(--border); }
+
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 3rem;
+      font-size: 0.9rem;
+    }
+
+    .loading {
+      text-align: center;
+      color: var(--muted);
+      padding: 2rem;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>☁ cloud.harizafiq.com</h1>
+  <span>MinIO · images</span>
+</header>
+
+<div class="container">
+
+  <!-- Upload zone -->
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" multiple />
+    <div class="dropzone-icon">📁</div>
+    <p><strong>Drop files here</strong> or click to browse</p>
+    <p style="margin-top:4px">Any file type · max 5 min presigned link</p>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-label">
+      <span id="progressName">Uploading…</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+  </div>
+
+  <!-- File list -->
+  <div class="files-header">
+    <h2>Files</h2>
+    <button class="refresh-btn" onclick="loadFiles()">↻ Refresh</button>
+  </div>
+
+  <div id="fileGrid" class="file-grid">
+    <div class="loading">Loading files…</div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  const IMAGE_TYPES = ["jpg","jpeg","png","gif","webp","svg","bmp","avif"];
+  const VIDEO_TYPES = ["mp4","webm","ogg","mov"];
+
+  function ext(name) { return name.split(".").pop().toLowerCase(); }
+
+  function icon(name) {
+    const e = ext(name);
+    if (IMAGE_TYPES.includes(e)) return "🖼";
+    if (VIDEO_TYPES.includes(e)) return "🎬";
+    if (["pdf"].includes(e)) return "📄";
+    if (["zip","rar","7z","tar","gz"].includes(e)) return "🗜";
+    if (["mp3","wav","flac","aac"].includes(e)) return "🎵";
+    return "📎";
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function showToast(msg, type = "success") {
+    const t = document.getElementById("toast");
+    t.textContent = (type === "success" ? "✓ " : "✕ ") + msg;
+    t.className = "toast visible " + type;
+    setTimeout(() => t.className = "toast", 3000);
+  }
+
+  // ── Drag & drop ──────────────────────────────────
+  const dropzone = document.getElementById("dropzone");
+
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragging"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragging"));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("dragging");
+    uploadFiles([...e.dataTransfer.files]);
+  });
+
+  document.getElementById("fileInput").addEventListener("change", (e) => {
+    uploadFiles([...e.target.files]);
+    e.target.value = "";
+  });
+
+  // ── Upload ───────────────────────────────────────
+  async function uploadFiles(files) {
+    for (const file of files) {
+      await uploadOne(file);
+    }
+    loadFiles();
+  }
+
+  async function uploadOne(file) {
+    const wrap = document.getElementById("progressWrap");
+    const bar = document.getElementById("progressBar");
+    const pct = document.getElementById("progressPct");
+    const name = document.getElementById("progressName");
+
+    wrap.classList.add("visible");
+    name.textContent = file.name;
+    bar.style.width = "0%";
+    pct.textContent = "0%";
+
+    try {
+      const res = await fetch("/generate-upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, contentType: file.type }),
+      });
+      const { uploadUrl } = await res.json();
+
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const p = Math.round((e.loaded / e.total) * 100);
+            bar.style.width = p + "%";
+            pct.textContent = p + "%";
+          }
+        };
+
+        xhr.onload = () => xhr.status < 400 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.send(file);
+      });
+
+      showToast(file.name + " uploaded");
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setTimeout(() => wrap.classList.remove("visible"), 800);
+    }
+  }
+
+  // ── File list ────────────────────────────────────
+  async function loadFiles() {
+    const grid = document.getElementById("fileGrid");
+    grid.innerHTML = '<div class="loading">Loading…</div>';
+
+    try {
+      const files = await fetch("/files").then((r) => r.json());
+
+      if (!files.length) {
+        grid.innerHTML = '<div class="empty">No files yet. Upload something!</div>';
+        return;
+      }
+
+      grid.innerHTML = files
+        .sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified))
+        .map((f) => {
+          const isImage = IMAGE_TYPES.includes(ext(f.name));
+          const preview = isImage
+            ? `<img src="${f.url}" alt="${f.name}" loading="lazy" />`
+            : `<span class="file-icon">${icon(f.name)}</span>`;
+
+          return `
+          <div class="file-card">
+            <div class="file-preview">${preview}</div>
+            <div class="file-info">
+              <div class="file-name" title="${f.name}">${f.name}</div>
+              <div class="file-meta">${fmtSize(f.size)} · ${fmtDate(f.lastModified)}</div>
+            </div>
+            <div class="file-actions">
+              <button onclick="copyLink('${f.url}')">⎘ Copy</button>
+              <button onclick="downloadFile('${f.name}')">↓ Download</button>
+              <button class="del" onclick="deleteFile('${f.name}')">✕</button>
+            </div>
+          </div>`;
+        })
+        .join("");
+    } catch (err) {
+      grid.innerHTML = '<div class="empty">Failed to load files.</div>';
+    }
+  }
+
+  async function copyLink(url) {
+    await navigator.clipboard.writeText(url);
+    showToast("Link copied");
+  }
+
+  async function downloadFile(name) {
+    const res = await fetch(`/generate-download-url?filename=${encodeURIComponent(name)}`);
+    const { downloadUrl } = await res.json();
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = name;
+    a.click();
+  }
+
+  async function deleteFile(name) {
+    if (!confirm(`Delete "${name}"?`)) return;
+    await fetch(`/files/${encodeURIComponent(name)}`, { method: "DELETE" });
+    showToast(name + " deleted");
+    loadFiles();
+  }
+
+  loadFiles();
+</script>
+</body>
+</html>
