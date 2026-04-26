@@ -115,19 +115,16 @@ tunnel: <your-tunnel-id>
 credentials-file: C:\Users\<your-user>\.cloudflared\<your-tunnel-id>.json
 
 ingress:
-  - hostname: cloud.harizafiq.com
-    service: http://host.docker.internal:9000
   - hostname: storage.harizafiq.com
     service: http://localhost:80
   - service: http_status:404
 ```
 
-`storage.harizafiq.com` routes to Caddy on port 80, which handles all routing internally. `cloud.harizafiq.com` routes directly to MinIO (legacy, kept for direct bucket access).
+`storage.harizafiq.com` routes to Caddy on port 80, which handles all routing internally.
 
 ### Create the DNS records
 
 ```bash
-cloudflared tunnel route dns minio-tunnel cloud.harizafiq.com
 cloudflared tunnel route dns minio-tunnel storage.harizafiq.com
 ```
 

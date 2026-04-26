@@ -42,7 +42,6 @@ Config: `C:\Caddy\Caddyfile`. Routes:
 
 ### Tunnel config
 `C:\cloudflared\config.yml` — ingress rules for the tunnel:
-- `cloud.harizafiq.com` → MinIO directly (`http://host.docker.internal:9000`)
 - `storage.harizafiq.com` → Caddy (`http://localhost:80`), which routes to Express or MinIO
 
 No DDNS or router port forwarding needed — the tunnel creates an outbound connection to Cloudflare.
