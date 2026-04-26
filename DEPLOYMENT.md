@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This documents the production deployment of cloud-harizafiq on a Windows PC with a dynamic public IP, served at `https://storage.harizafiq.com` via Cloudflare.
+This documents the production deployment of cloud-harizafiq on a Windows PC with a dynamic public IP, served at `https://storage.harizafiq.com` via Cloudflare Tunnel.
 
 ---
 
@@ -10,52 +10,59 @@ This documents the production deployment of cloud-harizafiq on a Windows PC with
 Browser
   │  HTTPS
   ▼
-Cloudflare (proxied, handles TLS)
-  │  HTTP :80
+Cloudflare Edge (handles TLS, no port forwarding needed)
+  │
+  │  Cloudflare Tunnel (outbound connection from this PC)
   ▼
-Windows PC ── Caddy (reverse proxy, port 80)
-                │
-                ├── /generate-upload-url*    ─┐
-                ├── /generate-download-url*   ├─► Express app (port 3000)
-                ├── /files*                  ─┘
-                │
-                └── /* (presigned URL paths) ──► MinIO Docker (port 9000)
+cloudflared service (C:\Program Files (x86)\cloudflared\cloudflared.exe)
+  │  config: C:\cloudflared\config.yml
+  │
+  ▼
+Caddy (reverse proxy, port 80)
+  │
+  ├── /generate-upload-url*    ─┐
+  ├── /generate-download-url*   ├─► Express app (port 3000)
+  ├── /files*                  ─┘
+  │
+  └── /* (presigned URL paths) ──► MinIO Docker (port 9000)
 ```
 
-Three Windows services (managed by NSSM) run at boot:
+**Why Cloudflare Tunnel?** The tunnel creates an outbound connection from this machine to Cloudflare's edge. No router port forwarding is needed, and the dynamic IP is irrelevant — traffic is routed through the tunnel regardless of the machine's IP.
 
-| Service | Binary | Purpose |
+Windows services at boot:
+
+| Service | What it runs | Purpose |
 |---|---|---|
+| `cloudflared` | `cloudflared.exe tunnel --config C:\cloudflared\config.yml run` | Tunnel to Cloudflare |
 | `CaddyProxy` | `C:\Caddy\caddy.exe` | Reverse proxy on port 80 |
-| `CloudHarizafiq` | `node index.js` | Express API + frontend |
-| `CloudflareDDNS` | `node D:\cf-ddns\ddns-service.js` | Updates DNS record every 5 min |
+| `CloudHarizafiq` | `node index.js` | Express API + frontend on port 3000 |
 
-MinIO runs as a Docker container with `restart: unless-stopped`.
+MinIO runs as a Docker container (`restart: unless-stopped`). Docker Desktop launches on user login.
 
 ---
 
 ## Prerequisites
 
 - Windows 10/11
-- [Node.js](https://nodejs.org/) installed (confirms with `node --version`)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and set to launch on login
-- MinIO container already running:
-  ```
-  docker run -d --name minio \
-    -p 9000:9000 -p 9001:9001 \
-    -e MINIO_ROOT_USER=<access-key> \
-    -e MINIO_ROOT_PASSWORD=<secret-key> \
-    -v minio-data:/data \
+- [Node.js](https://nodejs.org/) installed
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, set to launch on login
+- MinIO Docker container running:
+  ```bash
+  docker run -d --name minio ^
+    -p 9000:9000 -p 9001:9001 ^
+    -e "MINIO_ROOT_USER=<access-key>" ^
+    -e "MINIO_ROOT_PASSWORD=<secret-key>" ^
+    -v C:\minio-data:/data ^
     minio/minio server /data --console-address ":9001"
   ```
-- A Cloudflare account managing your domain, with an API token that has `Zone:DNS:Edit` permission
-- A bucket already created in MinIO
+- A Cloudflare account managing your domain
+- A bucket already created in MinIO (admin console at `http://localhost:9001`)
 
 ---
 
 ## Step 1 — Configure environment variables
 
-Copy `.env.example` to `.env` and fill in your values:
+Copy `.env.example` to `.env`:
 
 ```env
 MINIO_ENDPOINT=http://localhost:9000
@@ -65,13 +72,11 @@ MINIO_SECRET_KEY=your-secret-key
 BUCKET=your-bucket-name
 ```
 
-`MINIO_ENDPOINT` is used server-side for signing. `MINIO_PUBLIC_ENDPOINT` is rewritten into the presigned URLs that the browser receives. They are different because MinIO is only reachable internally; the browser goes through Caddy → MinIO.
+`MINIO_ENDPOINT` is used server-side for signing presigned URLs. `MINIO_PUBLIC_ENDPOINT` is the host rewritten into those URLs so the browser can reach MinIO through Caddy.
 
 ---
 
 ## Step 2 — Set MinIO container restart policy
-
-So the container survives reboots (Docker Desktop auto-launches on user login):
 
 ```bash
 docker update --restart unless-stopped minio
@@ -79,37 +84,80 @@ docker update --restart unless-stopped minio
 
 ---
 
-## Step 3 — Set up Cloudflare DNS
+## Step 3 — Set up Cloudflare Tunnel
 
-### Create the DNS record
-
-Run `D:\cf-ddns\setup-dns.js` once. It:
-1. Fetches your current public IPv4 from `checkip.amazonaws.com`
-2. Creates an `A` record for `storage.harizafiq.com` (proxied / orange cloud)
-3. Patches `update-ip.js` with the returned record ID
+### Install cloudflared
 
 ```bash
-cd D:\cf-ddns
-node --input-type=module < setup-dns.js
+winget install Cloudflare.cloudflared
 ```
 
-> **Note:** The script uses `checkip.amazonaws.com` rather than `ifconfig.me` or `api.ipify.org` because this machine has native IPv6 connectivity — other services either return the IPv6 address or time out when forced to IPv4.
+### Authenticate
 
-### Cloudflare SSL mode
+```bash
+cloudflared tunnel login
+```
 
-In Cloudflare → your domain → **SSL/TLS**, set the mode to **Flexible**. Cloudflare terminates HTTPS from the browser and connects to the origin over plain HTTP on port 80. The origin does not need a certificate.
+A browser window opens — select your domain (`harizafiq.com`). This writes `cert.pem` to `C:\Users\{user}\.cloudflared\`.
+
+### Create the tunnel
+
+```bash
+cloudflared tunnel create minio-tunnel
+```
+
+Note the tunnel ID from the output.
+
+### Create `C:\cloudflared\config.yml`
+
+```yaml
+tunnel: <your-tunnel-id>
+credentials-file: C:\Users\<your-user>\.cloudflared\<your-tunnel-id>.json
+
+ingress:
+  - hostname: cloud.harizafiq.com
+    service: http://host.docker.internal:9000
+  - hostname: storage.harizafiq.com
+    service: http://localhost:80
+  - service: http_status:404
+```
+
+`storage.harizafiq.com` routes to Caddy on port 80, which handles all routing internally. `cloud.harizafiq.com` routes directly to MinIO (legacy, kept for direct bucket access).
+
+### Create the DNS records
+
+```bash
+cloudflared tunnel route dns minio-tunnel cloud.harizafiq.com
+cloudflared tunnel route dns minio-tunnel storage.harizafiq.com
+```
+
+This creates CNAME records in Cloudflare pointing to the tunnel — no IP address management needed.
+
+### Install cloudflared as a Windows service (elevated PowerShell)
+
+```powershell
+# Register the service
+cloudflared service install
+
+# Update ImagePath to include the config file
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\cloudflared' `
+  -Name ImagePath `
+  -Value '"C:\Program Files (x86)\cloudflared\cloudflared.exe" tunnel --config "C:\cloudflared\config.yml" run'
+
+Restart-Service cloudflared
+```
+
+Verify the tunnel is connected:
+
+```bash
+cloudflared tunnel info minio-tunnel
+```
+
+You should see active connections listed under `CONNECTOR ID`.
 
 ---
 
-## Step 4 — Set up the DDNS updater
-
-`D:\cf-ddns\ddns-service.js` is a persistent Node.js loop that updates the DNS record every 5 minutes. It is registered as a Windows service (see Step 6) rather than a scheduled task because creating root-level scheduled tasks requires interactive admin access each time.
-
-The script is self-contained — no `.env` file needed. It reads the Cloudflare API token, zone ID, and record ID directly from its constants.
-
----
-
-## Step 5 — Install Caddy
+## Step 4 — Install Caddy
 
 Download the binary (no installer):
 
@@ -147,17 +195,17 @@ Create `C:\Caddy\Caddyfile`:
 }
 ```
 
-**Why the `header_up Host` directive?** Presigned URLs are signed with `localhost:9000` as the host (because `MINIO_ENDPOINT` is `http://localhost:9000`). When a browser sends the request to `storage.harizafiq.com`, Caddy would normally forward `Host: storage.harizafiq.com` to MinIO — but MinIO would reject it because the host doesn't match the signature. Setting `header_up Host localhost:9000` makes MinIO see the host it originally signed against.
+**Why `header_up Host localhost:9000`?** Presigned URLs are signed with `localhost:9000` as the host (because `MINIO_ENDPOINT` is `http://localhost:9000`). Without this rewrite, MinIO would receive `Host: storage.harizafiq.com` and reject the request because the host doesn't match the signature.
 
-**Why no CORS configuration?** The browser page is served from `storage.harizafiq.com` and all presigned URLs also resolve to `storage.harizafiq.com` (via Caddy → MinIO). Same origin — no preflight needed.
+**Why no CORS configuration?** The browser page and all presigned URLs are both on `storage.harizafiq.com` (via the tunnel → Caddy → MinIO). Same origin — no preflight needed.
 
 ---
 
-## Step 6 — Install NSSM and register Windows services
+## Step 5 — Install NSSM and register Windows services
 
-[NSSM](https://nssm.cc/) (Non-Sucking Service Manager) wraps any executable as a Windows service with auto-restart.
+[NSSM](https://nssm.cc/) wraps any executable as a Windows service with auto-restart and log rotation.
 
-Download and extract:
+Download and extract (no admin needed for this):
 
 ```powershell
 Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" `
@@ -204,84 +252,41 @@ New-Item -ItemType Directory -Force "$app\logs"
 Start-Service CloudHarizafiq
 ```
 
-### DDNS service
-
-```powershell
-$node = "C:\Program Files\nodejs\node.exe"
-
-nssm install CloudflareDDNS $node
-nssm set CloudflareDDNS AppParameters "D:\cf-ddns\ddns-service.js"
-nssm set CloudflareDDNS AppDirectory D:\cf-ddns
-nssm set CloudflareDDNS DisplayName "Cloudflare DDNS Updater"
-nssm set CloudflareDDNS Start SERVICE_AUTO_START
-nssm set CloudflareDDNS AppStdout D:\cf-ddns\logs\ddns.log
-nssm set CloudflareDDNS AppStderr D:\cf-ddns\logs\ddns-error.log
-nssm set CloudflareDDNS AppRotateFiles 1
-nssm set CloudflareDDNS AppRotateBytes 2000000
-New-Item -ItemType Directory -Force D:\cf-ddns\logs
-Start-Service CloudflareDDNS
-```
-
-> An `admin-setup.ps1` script at `D:\cf-ddns\admin-setup.ps1` automates all three service installs and can be re-run if services need to be reinstalled after a fresh Windows setup.
-
----
-
-## Step 7 — Open Windows Firewall port 80
-
-In an elevated PowerShell:
-
-```powershell
-New-NetFirewallRule -DisplayName "Caddy HTTP Inbound" `
-  -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
-```
-
----
-
-## Step 8 — Forward port 80 on your router
-
-Log into your router admin panel and add a port forwarding rule:
-
-| Field | Value |
-|---|---|
-| External port | 80 |
-| Internal IP | This machine's local IP (`ipconfig` to find it) |
-| Internal port | 80 |
-| Protocol | TCP |
+> `D:\cf-ddns\admin-setup.ps1` automates both service installs and can be re-run after a fresh Windows setup.
 
 ---
 
 ## Verification
 
-After all steps are complete:
-
 ```powershell
-# All three services should be Running / Automatic
-Get-Service CaddyProxy, CloudHarizafiq, CloudflareDDNS | Select Name, Status, StartType
+# Services should be Running
+Get-Service cloudflared, CaddyProxy, CloudHarizafiq | Select-Object Name, Status, StartType
 
-# Port 80 and 3000 should be listening
+# Tunnel should show active connections
+cloudflared tunnel info minio-tunnel
+
+# Ports 80 and 3000 should be listening
 netstat -ano | findstr ":80 "
 netstat -ano | findstr ":3000 "
 
-# DDNS log should show successful updates
-Get-Content D:\cf-ddns\logs\ddns.log -Tail 5
-
 # MinIO container running with correct restart policy
 docker inspect minio --format "{{.HostConfig.RestartPolicy.Name}}"
-```
 
-Then open `https://storage.harizafiq.com` in a browser — you should see the file upload UI.
+# End-to-end: should return 200
+curl -o /dev/null -w "%{http_code}" https://storage.harizafiq.com/
+```
 
 ---
 
 ## Day-to-day operations
 
-### Restarting after code changes
+### Restart after code changes
 
 ```powershell
 Restart-Service CloudHarizafiq
 ```
 
-### Viewing logs
+### View logs
 
 ```powershell
 # Express app
@@ -290,21 +295,15 @@ Get-Content D:\git-folder\cloud-harizafiq\logs\app-error.log -Tail 50
 # Caddy
 Get-Content C:\Caddy\logs\caddy-error.log -Tail 50
 
-# DDNS
-Get-Content D:\cf-ddns\logs\ddns.log -Tail 20
+# Tunnel
+Get-EventLog -LogName Application -Source "*cloudflared*" -Newest 20
 ```
 
-### Stopping / starting services
+### Stop / start all services
 
 ```powershell
-Stop-Service CaddyProxy, CloudHarizafiq, CloudflareDDNS
-Start-Service CaddyProxy, CloudHarizafiq, CloudflareDDNS
-```
-
-### Checking the current public IP
-
-```powershell
-(Invoke-WebRequest https://checkip.amazonaws.com -UseBasicParsing).Content.Trim()
+Stop-Service cloudflared, CaddyProxy, CloudHarizafiq
+Start-Service cloudflared, CaddyProxy, CloudHarizafiq
 ```
 
 ---
@@ -321,19 +320,21 @@ D:\git-folder\cloud-harizafiq\   ← this repo
   CLAUDE.md                       AI assistant context
   logs\                           App logs (gitignored)
 
+C:\cloudflared\
+  config.yml                      Tunnel ingress rules
+
 C:\Caddy\
   caddy.exe                       Caddy binary
-  Caddyfile                       Reverse proxy config
+  Caddyfile                       Reverse proxy routing config
   logs\                           Caddy logs
-
-D:\cf-ddns\
-  ddns-service.js                 Persistent DDNS loop (registered as service)
-  update-ip.js                    One-shot DDNS updater (manual use / testing)
-  setup-dns.js                    One-time script: creates CF record, patches update-ip.js
-  run-ddns.bat                    Wrapper bat (legacy, kept for reference)
-  admin-setup.ps1                 Full service install script (run as admin)
-  logs\                           DDNS logs
 
 C:\nssm\
   nssm.exe                        Service manager binary
+
+C:\Program Files (x86)\cloudflared\
+  cloudflared.exe                 Cloudflared binary (installed via winget)
+
+C:\Users\{user}\.cloudflared\
+  cert.pem                        Cloudflare auth cert
+  {tunnel-id}.json                Tunnel credentials
 ```

@@ -10,13 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Production Deployment (Windows — storage.harizafiq.com)
 
-The app is deployed on Windows with three auto-start Windows services managed by NSSM (`C:\nssm\nssm.exe`):
+The app is deployed on Windows. Traffic reaches the machine via **Cloudflare Tunnel** (no router port forwarding needed). Two NSSM services (`C:\nssm\nssm.exe`) run Caddy and the Express app:
 
 | Service name | What it runs | Port |
 |---|---|---|
+| `cloudflared` | Cloudflare Tunnel (`C:\Program Files (x86)\cloudflared\cloudflared.exe`) | — |
 | `CaddyProxy` | Caddy reverse proxy (`C:\Caddy\caddy.exe`) | 80 |
 | `CloudHarizafiq` | This Express app (`node index.js`) | 3000 |
-| `CloudflareDDNS` | DDNS loop (`node D:\cf-ddns\ddns-service.js`) | — |
 
 MinIO runs as a Docker container (`docker ps` → `minio`, restart policy `unless-stopped`).
 
@@ -40,14 +40,15 @@ Config: `C:\Caddy\Caddyfile`. Routes:
 
 **Critical:** The MinIO reverse_proxy block sets `header_up Host localhost:9000`. Without this, MinIO rejects presigned URLs because the signature was computed against `localhost:9000` but Caddy would forward `Host: storage.harizafiq.com`.
 
-### DNS / Dynamic IP
-`D:\cf-ddns\ddns-service.js` — Node.js loop that updates `storage.harizafiq.com` in Cloudflare every 5 minutes. Uses `checkip.amazonaws.com` for IPv4 (machine also has IPv6; other services timed out or returned IPv6).
+### Tunnel config
+`C:\cloudflared\config.yml` — ingress rules for the tunnel:
+- `cloud.harizafiq.com` → MinIO directly (`http://host.docker.internal:9000`)
+- `storage.harizafiq.com` → Caddy (`http://localhost:80`), which routes to Express or MinIO
 
-Cloudflare zone: `e1aefa20de42d8f71110b7d2934ff04b`
-DNS record ID for `storage.harizafiq.com`: `d639f20ed6943e1e257609d215501c4c`
+No DDNS or router port forwarding needed — the tunnel creates an outbound connection to Cloudflare.
 
 ### Re-running admin setup
-If services need to be reinstalled (e.g. after fresh Windows install), run as Administrator:
+If NSSM services need to be reinstalled (e.g. after fresh Windows install), run as Administrator:
 ```powershell
 D:\cf-ddns\admin-setup.ps1
 ```
