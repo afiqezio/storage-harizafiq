@@ -6,6 +6,10 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   ListObjectsV2Command,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -96,6 +100,52 @@ app.delete("/files/:filename", async (req, res) => {
 
   await s3.send(command);
   res.json({ deleted: filename });
+});
+
+app.post("/create-multipart-upload", async (req, res) => {
+  const { filename, contentType } = req.body;
+  if (!filename) return res.status(400).json({ error: "filename is required" });
+  const { UploadId } = await s3.send(new CreateMultipartUploadCommand({
+    Bucket: process.env.BUCKET,
+    Key: filename,
+    ContentType: contentType || "application/octet-stream",
+  }));
+  res.json({ uploadId: UploadId });
+});
+
+app.get("/generate-part-url", async (req, res) => {
+  const { filename, uploadId, partNumber } = req.query;
+  if (!filename || !uploadId || !partNumber) return res.status(400).json({ error: "filename, uploadId, partNumber required" });
+  const url = toPublicUrl(await getSignedUrl(s3, new UploadPartCommand({
+    Bucket: process.env.BUCKET,
+    Key: filename,
+    UploadId: uploadId,
+    PartNumber: parseInt(partNumber),
+  }), { expiresIn: 3600 }));
+  res.json({ url });
+});
+
+app.post("/complete-multipart-upload", async (req, res) => {
+  const { filename, uploadId, parts } = req.body;
+  if (!filename || !uploadId || !parts) return res.status(400).json({ error: "filename, uploadId, parts required" });
+  await s3.send(new CompleteMultipartUploadCommand({
+    Bucket: process.env.BUCKET,
+    Key: filename,
+    UploadId: uploadId,
+    MultipartUpload: { Parts: parts },
+  }));
+  res.json({ url: `${process.env.MINIO_PUBLIC_ENDPOINT}/${process.env.BUCKET}/${filename}` });
+});
+
+app.post("/abort-multipart-upload", async (req, res) => {
+  const { filename, uploadId } = req.body;
+  if (!filename || !uploadId) return res.status(400).json({ error: "filename, uploadId required" });
+  await s3.send(new AbortMultipartUploadCommand({
+    Bucket: process.env.BUCKET,
+    Key: filename,
+    UploadId: uploadId,
+  }));
+  res.json({ aborted: filename });
 });
 
 const PORT = process.env.PORT || 3000;

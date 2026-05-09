@@ -722,6 +722,8 @@
   });
 
   // ── Upload ──
+  const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB — safely under Cloudflare's 100 MB limit
+
   async function uploadFiles(files) {
     for (const file of files) await uploadOne(file);
     loadFiles();
@@ -734,39 +736,106 @@
     const name = document.getElementById("progressName");
 
     wrap.classList.add("visible");
-    name.textContent  = file.name;
-    bar.style.width   = "0%";
-    pct.textContent   = "0%";
+    name.textContent = file.name;
+    bar.style.width  = "0%";
+    pct.textContent  = "0%";
 
     try {
-      const res = await fetch("/generate-upload-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: file.name, contentType: file.type }),
-      });
-      const { uploadUrl } = await res.json();
-
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("PUT", uploadUrl);
-        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const p = Math.round((e.loaded / e.total) * 100);
-            bar.style.width = p + "%";
-            pct.textContent = p + "%";
-          }
-        };
-        xhr.onload  = () => xhr.status < 400 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
-        xhr.onerror = () => reject(new Error("Network error"));
-        xhr.send(file);
-      });
-
+      if (file.size > CHUNK_SIZE) {
+        await uploadMultipart(file, bar, pct);
+      } else {
+        await uploadSingle(file, bar, pct);
+      }
       showToast(file.name + " uploaded");
     } catch (err) {
       showToast(err.message, "error");
     } finally {
       setTimeout(() => wrap.classList.remove("visible"), 900);
+    }
+  }
+
+  async function uploadSingle(file, bar, pct) {
+    const { uploadUrl } = await fetch("/generate-upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, contentType: file.type }),
+    }).then(r => r.json());
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", uploadUrl);
+      xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const p = Math.round((e.loaded / e.total) * 100);
+          bar.style.width = p + "%";
+          pct.textContent = p + "%";
+        }
+      };
+      xhr.onload  = () => xhr.status < 400 ? resolve() : reject(new Error("Upload failed: " + xhr.status));
+      xhr.onerror = () => reject(new Error("Network error"));
+      xhr.send(file);
+    });
+  }
+
+  async function uploadMultipart(file, bar, pct) {
+    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+
+    const { uploadId } = await fetch("/create-multipart-upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, contentType: file.type }),
+    }).then(r => r.json());
+
+    const parts = [];
+    try {
+      for (let i = 0; i < totalParts; i++) {
+        const partNumber = i + 1;
+        const start = i * CHUNK_SIZE;
+        const chunk = file.slice(start, start + CHUNK_SIZE);
+
+        const { url } = await fetch(
+          `/generate-part-url?filename=${encodeURIComponent(file.name)}&uploadId=${uploadId}&partNumber=${partNumber}`
+        ).then(r => r.json());
+
+        const etag = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("PUT", url);
+          xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const overall = Math.round(((i + e.loaded / e.total) / totalParts) * 100);
+              bar.style.width = overall + "%";
+              pct.textContent = overall + "%";
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status < 400) {
+              resolve(xhr.getResponseHeader("ETag"));
+            } else {
+              reject(new Error(`Part ${partNumber} failed: ${xhr.status}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error(`Part ${partNumber} network error`));
+          xhr.send(chunk);
+        });
+
+        parts.push({ PartNumber: partNumber, ETag: etag });
+      }
+
+      await fetch("/complete-multipart-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, uploadId, parts }),
+      });
+    } catch (err) {
+      // clean up the incomplete upload on MinIO to avoid orphaned data
+      await fetch("/abort-multipart-upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, uploadId }),
+      }).catch(() => {});
+      throw err;
     }
   }
 
