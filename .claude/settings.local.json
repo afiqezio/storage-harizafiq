@@ -1,7 +1,39 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(sc query *)",
+      "Bash(where minio *)",
+      "Bash(where caddy *)",
+      "Bash(where nssm *)",
+      "Bash(where choco *)",
+      "Bash(schtasks /query /fo LIST)",
+      "PowerShell(Get-ScheduledTask *)",
+      "Bash(where node *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(netstat *)",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(Get-WmiObject *)",
+      "Bash(node --input-type=module)",
+      "Bash(docker update *)",
+      "Bash(node setup-cors.js)",
+      "Bash(docker exec *)",
+      "Bash(node update-ip.js)",
+      "PowerShell(Get-Service | Where-Object { $_.Name -match \"Caddy|caddy|Cloud|cloud|nssm\" } | Select-Object Name, Status, StartType)",
+      "PowerShell(Test-Path \"C:\\\\Caddy\\\\caddy.exe\"; \\(Get-Item \"C:\\\\Caddy\\\\caddy.exe\"\\).Length)",
+      "PowerShell(Get-NetFirewallRule *)",
+      "PowerShell(netsh advfirewall *)",
+      "PowerShell(schtasks *)",
+      "Bash(powershell *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git config *)",
+      "Bash(curl *)",
+      "Bash(cloudflared --version)",
+      "Bash(cloudflared tunnel *)",
+      "Bash(dir \"C:\\\\Users\\\\User\\\\.cloudflared\")",
+      "Bash(dir \"C:\\\\cloudflared\")",
+      "Bash(reg query *)"
     ]
   }
 }
